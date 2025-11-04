@@ -3,9 +3,9 @@ use std::time::Duration;
 use chrono::{Local, Timelike};
 
 use crate::{
-    config::{APP_ID, Flags, MOON_ICON, SUN_ICON, WeatherConfig, flags},
+    config::{flags, APP_ID, Flags, MOON_ICON, SUN_ICON, WeatherConfig},
     fl,
-    weather::get_location_forecast,
+    weather::{get_location_forecast, ObservationData},
 };
 
 pub fn run() -> cosmic::iced::Result {
@@ -17,7 +17,7 @@ struct Weather {
     popup: Option<cosmic::iced::window::Id>,
     config: WeatherConfig,
     config_handler: Option<cosmic::cosmic_config::Config>,
-    temperature: i32,
+    observation: ObservationData,
     latitude: String,
     longitude: String,
     use_fahrenheit: bool,
@@ -31,22 +31,31 @@ impl Weather {
                 self.config.longitude.to_string(),
             ),
             |result| match result {
-                Ok(temperature) => {
-                    cosmic::action::Action::App(Message::UpdateTemperature(temperature))
+                Ok(observation) => {
+                    cosmic::action::Action::App(Message::UpdateObservation(observation))
                 }
                 Err(error) => {
                     tracing::error!("Failed to get location forecast: {error:?}");
-                    cosmic::action::Action::App(Message::UpdateTemperature(0))
+                    cosmic::action::Action::App(Message::UpdateObservation(
+                        ObservationData::default(),
+                    ))
                 }
             },
         )
     }
 
-    fn format_temperature(&self) -> String {
-        if self.use_fahrenheit {
-            format!("{:.1}°F", self.temperature * 9 / 5 + 32)
+    fn format_wind_details(&self) -> String {
+        let direction = if self.observation.wind_dir.trim().is_empty() {
+            "-"
         } else {
-            format!("{:.1}°C", self.temperature)
+            self.observation.wind_dir.as_str()
+        };
+
+        match (self.observation.wind_spd_kt, self.observation.gust_kt) {
+            (Some(speed), Some(gust)) => format!("{direction} {speed}kt gust {gust}kt"),
+            (Some(speed), None) => format!("{direction} {speed}kt"),
+            (None, Some(gust)) => format!("{direction} gust {gust}kt"),
+            (None, None) => direction.to_string(),
         }
     }
 }
@@ -56,7 +65,7 @@ pub enum Message {
     Tick,
     ToggleWindow,
     PopupClosed(cosmic::iced::window::Id),
-    UpdateTemperature(i32),
+    UpdateObservation(ObservationData),
     UpdateLatitude(String),
     UpdateLongitude(String),
     ToggleFahrenheit(bool),
@@ -83,7 +92,7 @@ impl cosmic::Application for Weather {
                 popup: None,
                 config: flags.config,
                 config_handler: flags.config_handler,
-                temperature: 0,
+                observation: ObservationData::default(),
                 latitude: latitude.to_string(),
                 longitude: longitude.to_string(),
                 use_fahrenheit,
@@ -114,8 +123,8 @@ impl cosmic::Application for Weather {
 
     fn update(&mut self, message: Message) -> cosmic::app::Task<Self::Message> {
         match message {
-            Message::UpdateTemperature(value) => {
-                self.temperature = value;
+            Message::UpdateObservation(value) => {
+                self.observation = value;
             }
             Message::Tick => {
                 return self.update_weather_data();
@@ -199,10 +208,11 @@ impl cosmic::Application for Weather {
                 .symbolic(true),
         ]
         .padding([3, 0, 0, 0]);
-        let temperature =
-            cosmic::iced_widget::row![cosmic::iced_widget::text(self.format_temperature())];
+        let wind_details =
+            cosmic::iced_widget::row![cosmic::iced_widget::text(self.format_wind_details())];
 
-        let data = cosmic::Element::from(cosmic::iced_widget::row![icon, temperature].spacing(4));
+        let data =
+            cosmic::Element::from(cosmic::iced_widget::row![icon, wind_details].spacing(4));
         let button = cosmic::widget::button::custom(data)
             .class(cosmic::theme::Button::AppletIcon)
             .on_press_down(Message::ToggleWindow);

@@ -1,3 +1,8 @@
+##
+
+Modified by me to fetch data from the BOM and to show wind, rather than temperature.
+Hard coded...but what you gonna do.
+
 # Simple weather info applet for cosmic
 
 <p align="center">
